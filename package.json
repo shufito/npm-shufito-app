@@ -1,0 +1,23 @@
+{
+  "name": "shufito_app",
+  "version": "1.0.3",
+  "description": "CLI para criar projetos com Vite, Tailwind e ShadCN",
+  "main": "index.js",
+  "bin": {
+    "create-shufito-app": "./index.js"
+  },
+  "keywords": [
+    "vite",
+    "tailwind",
+    "shadcn",
+    "cli",
+    "react"
+  ],
+  "author": "Shufito",
+  "license": "MIT",
+  "dependencies": {
+    "fs": "^0.0.1-security",
+    "inquirer": "^12.4.1",
+    "path": "^0.12.7"
+  }
+}
