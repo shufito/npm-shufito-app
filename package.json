@@ -1,10 +1,17 @@
 {
-  "name": "shufito_app",
-  "version": "1.0.3",
+  "name": "create-shufito-app",
+  "version": "1.0.0",
   "description": "CLI para criar projetos com Vite, Tailwind e ShadCN",
   "main": "index.js",
   "bin": {
-    "create-shufito-app": "./index.js"
+    "create-shufito-app": "index.js",
+    "cva": "index.js"
+  },
+  "files": [
+    "index.js"
+  ],
+  "scripts": {
+    "build": "echo 'build step (opcional)'"
   },
   "keywords": [
     "vite",
@@ -19,5 +26,14 @@
     "fs": "^0.0.1-security",
     "inquirer": "^12.4.1",
     "path": "^0.12.7"
-  }
+  },
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shufito/npm-shufito-app.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shufito/npm-shufito-app/issues"
+  },
+  "homepage": "https://github.com/shufito/npm-shufito-app#readme"
 }

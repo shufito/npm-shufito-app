@@ -1,0 +1,490 @@
+import axios from "axios";
+import { format } from "date-fns";
+
+// Configuração do axios (opcional)
+const axiosInstance = axios.create({
+  baseURL: `${window.location.origin}/mge`,
+  withCredentials: true, // Inclui cookies automaticamente
+  headers: {
+    "Content-Type": "application/json; charset=UTF-8",
+  },
+});
+
+// Função genérica para requisições POST
+const postRequest = async <T>(
+  url: string,
+  body: any,
+  options: { headers?: any; raw?: boolean } = {}
+): Promise<T> => {
+  const { headers = {}, raw = false } = options;
+
+  try {
+    const response = await axiosInstance.post(url, body, {
+      headers,
+    });
+
+    const data = response.data;
+    if (data.status !== "1") {
+      // O campo "statusMessage" é usado para descrever o erro
+      throw new Error(`${data.statusMessage || "Erro desconhecido."}`);
+    }
+    return raw ? (response as any) : data;
+  } catch (error: any) {
+    throw new Error(error.response?.data?.message || `${error.message}`);
+  }
+};
+
+type LoginResponse = {
+  serviceName: string;
+  status: string;
+  pendingPrinting: string;
+  transactionId: string;
+  responseBody?: {
+    callID?: { $: string };
+    jsessionid?: { $: string };
+    idusu?: { $: string };
+  };
+};
+
+const login = async () => {
+  const url = `/service.sbr?serviceName=MobileLoginSP.login&outputType=json`;
+  const body = {
+    requestBody: {
+      NOMUSU: { $: "" },
+      INTERNO: { $: "" },
+      KEEPCONNECTED: { $: "N" },
+    },
+  };
+
+  try {
+    const response: LoginResponse = await postRequest(url, body);
+
+    if (response?.status === "1" && response.responseBody?.jsessionid?.$) {
+      const jsessionid = response.responseBody.jsessionid.$;
+
+      document.cookie = `jsessionid=${jsessionid}; path=/; Secure`;
+
+      console.log("Login bem-sucedido. jsessionid salvo nos cookies.");
+    } else {
+      console.error("Erro no login:", response);
+    }
+  } catch (error) {
+    console.error("Erro na requisição:", error);
+  }
+};
+
+type LogoutResponse = {
+  serviceName: string;
+  status: string;
+  pendingPrinting: string;
+  transactionId?: string;
+  responseBody?: {};
+};
+
+const logout = async () => {
+  const url = `/service.sbr?serviceName=MobileLoginSP.logout&outputType=json`;
+  const body = {
+    serviceName: "WorkspaceSP.logout",
+  };
+
+  try {
+    const response: LogoutResponse = await postRequest(url, body);
+
+    if (response?.status === "1") {
+      document.cookie =
+        "jsessionid=; path=/; expires=Thu, 01 Jan 1970 00:00:00 UTC; Secure";
+      console.log("Logout bem-sucedido. jsessionid salvo nos cookies.");
+    } else {
+      console.error("Erro no login:", response);
+    }
+  } catch (error) {
+    console.error("Erro na requisição:", error);
+  }
+};
+
+// Função para parsear datas personalizadas
+const parseCustomDate = (dateString: string): string | null => {
+  const dateTimeRegex = /^(\d{2})(\d{2})(\d{4}) (\d{2}):(\d{2}):(\d{2})$/;
+  const match = dateString.match(dateTimeRegex);
+
+  if (!match) return null;
+
+  const [, day, month, year, hours, minutes, seconds] = match.map(Number);
+  const date = new Date(year, month - 1, day, hours, minutes, seconds); // Cria o objeto Date
+  return date.toISOString();
+};
+
+// Função para parsear o retorno da query
+const parseQueryResponse = (response: any) => {
+  let parsedData =
+    typeof response === "string" ? JSON.parse(response) : response;
+
+  parsedData = parsedData.data?.responseBody || parsedData.responseBody || {};
+  const fields = parsedData.fieldsMetadata || [];
+  const rows = parsedData.rows || [];
+
+  return rows.map((row: any) =>
+    fields.reduce((acc: any, field: any, i: number) => {
+      let value = row[i];
+
+      switch (field.userType?.toUpperCase()) {
+        case "I": // Inteiro
+          value = parseInt(value, 10);
+          value = isNaN(value) ? null : value; // Se não for um número válido, define como null
+          break;
+        case "S": // String
+          value = value?.toString() || "";
+          break;
+        case "H":
+          if (typeof value === "string") {
+            value = parseCustomDate(value) || value;
+          }
+          break;
+        default:
+          break; // Mantém o valor original se não houver um userType conhecido
+      }
+
+      return { ...acc, [field.name]: value };
+    }, {})
+  );
+};
+
+// Função para executar queries
+export const fetchQuery = async (queryText: string) => {
+  if (!queryText) throw new Error("Query não pode estar vazia.");
+
+  const formattedQuery = queryText.replace(/(\r\n|\n|\r)/gm, "");
+  const url = `/service.sbr?serviceName=DbExplorerSP.executeQuery&outputType=json`;
+  const body = {
+    serviceName: "DbExplorerSP.executeQuery",
+    requestBody: { sql: formattedQuery },
+  };
+
+  try {
+    if (window.location.origin.includes("localhost")) {
+      console.log("Rodando no localhost, iniciando login...");
+
+      await login(); // Faz o login antes
+    }
+
+    const response = await postRequest(url, body);
+    const data = parseQueryResponse(response);
+
+    if (window.location.origin.includes("localhost")) {
+      console.log("Executando logout...");
+      await logout(); // Faz o logout depois
+    }
+
+    return data;
+  } catch (error) {
+    console.error("Erro na execução da query:", error);
+
+    if (window.location.origin.includes("localhost")) {
+      console.log("Erro detectado, tentando logout...");
+      await logout(); // Tenta logout mesmo em caso de erro
+    }
+
+    throw error;
+  }
+};
+
+interface Dados {
+  [key: string]: any;
+}
+
+interface ChavePrimaria {
+  [key: string]: any;
+}
+
+const montarDadosEnvio = (
+  dados: Dados,
+  instancia: string,
+  chavePrimaria?: ChavePrimaria
+) => {
+  const camposConvertidos = Object.keys(dados).reduce(
+    (acc, chave) => ({
+      ...acc,
+      [chave.toUpperCase()]: { $: String(dados[chave]) },
+    }),
+    {}
+  );
+
+  const estruturaEnvio: any = {
+    serviceName: "CRUDServiceProvider.saveRecord",
+    requestBody: {
+      dataSet: {
+        rootEntity: instancia,
+        includePresentationFields: "N",
+        dataRow: {
+          localFields: camposConvertidos,
+        },
+        entity: {
+          fieldset: {
+            list: Object.keys(dados)
+              .map((campo) => campo.toUpperCase())
+              .join(","),
+          },
+        },
+      },
+    },
+  };
+
+  if (chavePrimaria) {
+    estruturaEnvio.requestBody.dataSet.dataRow.key = Object.keys(
+      chavePrimaria
+    ).reduce(
+      (acc, chave) => ({
+        ...acc,
+        [chave.toUpperCase()]: { $: String(chavePrimaria[chave]) },
+      }),
+      {}
+    );
+  }
+
+  return estruturaEnvio;
+};
+
+const salvarRegistro = async (
+  dados: Dados,
+  instancia: string,
+  chavePrimaria?: ChavePrimaria
+) => {
+  const url =
+    "/service.sbr?serviceName=CRUDServiceProvider.saveRecord&outputType=json";
+  const dadosEnvio = montarDadosEnvio(dados, instancia, chavePrimaria);
+
+  try {
+    if (window.location.origin.includes("localhost")) {
+      console.log("Rodando no localhost, iniciando login...");
+
+      await login(); // Faz o login antes
+    }
+
+    const response = await postRequest(url, dadosEnvio);
+
+    if (window.location.origin.includes("localhost")) {
+      console.log("Executando logout...");
+      await logout(); // Faz o logout depois
+    }
+
+    return response;
+  } catch (error: unknown) {
+    throw new Error(`${(error as Error).message}`);
+  }
+};
+
+export const salvar = async (
+  dados: Dados,
+  instancia: string,
+  chavesPrimarias?: ChavePrimaria | ChavePrimaria[]
+) => {
+  if (Array.isArray(chavesPrimarias) && chavesPrimarias.length) {
+    return Promise.all(
+      chavesPrimarias.map((chavePrimaria) =>
+        salvarRegistro(dados, instancia, chavePrimaria)
+      )
+    );
+  }
+  return salvarRegistro(dados, instancia, chavesPrimarias);
+};
+
+export const acionarBotaoJava = async (
+  dados: any,
+  idBotao: number,
+  rows?: any
+): Promise<any> => {
+  function converterParametro(dadosInternos: any) {
+    return dadosInternos
+      ? {
+          params: {
+            param: Object.keys(dadosInternos).map((chave) => {
+              let valor = dadosInternos[chave];
+              let tipo = "S"; // Default para string
+
+              if (typeof valor === "number") tipo = "I";
+              else if (valor instanceof Date) {
+                tipo = "D";
+                valor = format(valor, "dd/MM/yyyy"); // Converte a data para o formato correto
+              }
+
+              return {
+                type: tipo,
+                paramName: chave,
+                $: valor,
+              };
+            }),
+          },
+        }
+      : null;
+  }
+
+  function converterLinhas(rows: any[]) {
+    return {
+      rows: {
+        row: rows.map((row) => ({
+          field: Object.keys(row).map((chave) => ({
+            fieldName: chave,
+            $: row[chave],
+          })),
+        })),
+      },
+    };
+  }
+
+  const nomeServico = "ActionButtonsSP.executeJava";
+  const dadosEnvio = {
+    serviceName: nomeServico,
+    requestBody: {
+      javaCall: {
+        actionID: idBotao,
+        ...converterParametro(dados),
+      },
+    },
+  };
+
+  if (rows && rows.length > 0) {
+    dadosEnvio.requestBody.javaCall = {
+      ...dadosEnvio.requestBody.javaCall,
+      ...converterLinhas(rows),
+    };
+  }
+
+  const url = `/service.sbr?serviceName=${nomeServico}&outputType=json`;
+
+  return await postRequest(url, dadosEnvio);
+};
+
+const montarDadosEnvioNovo = (
+  dados: Dados,
+  instancia: string,
+  chavesPrimarias?: ChavePrimaria
+) => {
+  const fields = Object.keys(dados).map((campo) => campo.toUpperCase());
+
+  const valoresFiltrados = Object.entries(dados)
+    .filter(([_, valor]) => valor !== null && valor !== undefined)
+    .reduce(
+      (acc, [_, valor], index) => {
+        acc[index.toString()] = String(valor);
+        return acc;
+      },
+      {} as Record<string, string>
+    );
+
+  const record: any = { values: valoresFiltrados };
+
+  if (chavesPrimarias) {
+    record.pk = Object.keys(chavesPrimarias).reduce(
+      (acc, chave) => {
+        acc[chave.toUpperCase()] = String(chavesPrimarias[chave]);
+        return acc;
+      },
+      {} as Record<string, string>
+    );
+  }
+
+  return {
+    serviceName: "DatasetSP.save",
+    requestBody: {
+      entityName: instancia,
+      fields,
+      records: [record],
+    },
+  };
+};
+
+const salvarRegistroNovo = async (
+  dados: Dados,
+  instancia: string,
+  chavesPrimarias?: ChavePrimaria
+) => {
+  const url = "/service.sbr?serviceName=DatasetSP.save&outputType=json";
+  const dadosEnvio = montarDadosEnvioNovo(dados, instancia, chavesPrimarias);
+
+  try {
+    if (window.location.origin.includes("localhost")) {
+      console.log("Rodando no localhost, iniciando login...");
+
+      await login(); // Faz o login antes
+    }
+
+    const response = await postRequest(url, dadosEnvio);
+
+    if (window.location.origin.includes("localhost")) {
+      console.log("Executando logout...");
+      await logout(); // Faz o logout depois
+    }
+
+    return response;
+  } catch (error: unknown) {
+    throw new Error(`${(error as Error).message}`);
+  }
+};
+
+const formatarResposta = (response: any, campos: string[]) => {
+  if (
+    !response?.responseBody?.result ||
+    !Array.isArray(response.responseBody.result)
+  ) {
+    throw new Error("Resposta inválida.");
+  }
+
+  const resultado = response.responseBody.result[0]; // Pegamos o primeiro item da lista "result"
+  if (!resultado || resultado.length !== campos.length) {
+    throw new Error("Formato inesperado de resposta.");
+  }
+
+  // Criamos um objeto com os campos esperados mapeados para os valores retornados
+  const respostaFormatada = campos.reduce(
+    (acc, campo, index) => {
+      acc[campo] = resultado[index];
+      return acc;
+    },
+    {} as Record<string, any>
+  );
+
+  return respostaFormatada;
+};
+
+export const salvarNovo = async (
+  dados: Dados,
+  instancia: string,
+  chavesPrimarias?: ChavePrimaria | ChavePrimaria[]
+) => {
+  const campos = Object.keys(dados).map((campo) => campo.toUpperCase());
+
+  if (Array.isArray(chavesPrimarias) && chavesPrimarias.length) {
+    const resultados = await Promise.all(
+      chavesPrimarias.map((chavePrimaria) =>
+        salvarRegistroNovo(dados, instancia, chavePrimaria)
+      )
+    );
+    return resultados.map((res) => formatarResposta(res, campos));
+  }
+
+  const response = await salvarRegistroNovo(dados, instancia, chavesPrimarias);
+  return formatarResposta(response, campos);
+};
+
+export const uploadFile = async (file: File, sessionKey: string) => {
+  const formData = new FormData();
+  formData.append("arquivo", file); // Adiciona o arquivo ao FormData
+
+  try {
+    const response = await axiosInstance.post(
+      `/sessionUpload.mge?sessionkey=${encodeURIComponent(
+        sessionKey
+      )}&fitem=S&salvar=S&useCache=N`,
+      formData,
+      {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      }
+    );
+
+    console.log("Upload concluído:", response.data);
+  } catch (error) {
+    console.error("Erro no upload:", error);
+  }
+};
