@@ -8,7 +8,7 @@
     "cva": "index.js"
   },
   "files": [
-    "index.js"
+    "index.js","setup","templates","utils","prompts"
   ],
   "scripts": {
     "build": "echo 'build step (opcional)'"
