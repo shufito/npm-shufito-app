@@ -7,11 +7,12 @@ function configureShadcn() {
   fs.writeFileSync(
     "vite.config.ts",
     `import { defineConfig } from 'vite'
+import tailwindcss from "@tailwindcss/vite"
 import path from "path"
 import react from '@vitejs/plugin-react-swc'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -19,8 +20,8 @@ export default defineConfig({
   },
 })`
   );
-  execSync("npx shadcn@2.3.0 init", { stdio: "inherit" });
-  execSync("npx shadcn add button", { stdio: "inherit" });
+  execSync("npx shadcn@latest init", { stdio: "inherit" });
+  execSync("npx shadcn@latest add button", { stdio: "inherit" });
 }
 
 module.exports = configureShadcn;

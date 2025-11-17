@@ -12,19 +12,22 @@ function configureAxios(projectPath, isDashSankhya) {
   const queryFilePath = path.join(__dirname, "../templates/query.txt");
   const queryContent = fs.readFileSync(queryFilePath, "utf8");
   writeFile(path.join(libPath, "query.ts"), queryContent);
-
+  execSync("npm install date-fns", {
+    stdio: "inherit",
+  });
   execSync("npm install @insulino/vite-plugin-2sankhyabi", {
     stdio: "inherit",
   });
 
   const viteConfig = `
 import { defineConfig } from 'vite'
+import tailwindcss from "@tailwindcss/vite"
 import path from "path"
 import react from '@vitejs/plugin-react-swc'
 import { convertToSankhyaBI } from "@insulino/vite-plugin-2sankhyabi"
 
 export default defineConfig({
-  plugins: [react(), { ...convertToSankhyaBI(), apply: "build" }],
+  plugins: [react(), tailwindcss(), { ...convertToSankhyaBI(), apply: "build" }],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
