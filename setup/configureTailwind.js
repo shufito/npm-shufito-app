@@ -6,7 +6,6 @@ function configureTailwind() {
   execSync("npm install tailwindcss @tailwindcss/vite", {
     stdio: "inherit",
   });
-  execSync("npx tailwindcss init -p", { stdio: "inherit" });
 
   fs.writeFileSync("src/index.css", `@import "tailwindcss";`);
 }

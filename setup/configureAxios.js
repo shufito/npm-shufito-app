@@ -33,9 +33,31 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // server: {
+  //   proxy: {
+  //     "/": {
+  //       target: "",
+  //       changeOrigin: true,
+  //       rewrite: (path) => path.replace(/^\//, "//"),
+  //     },
+  //   },
+  // },
 })
   `;
   writeFile(path.join(projectPath, "vite.config.ts"), viteConfig);
+
+  const envConfig = `
+VITE_USERLOGIN = ""
+VITE_PASSWORD = ""
+  `;
+  writeFile(path.join(projectPath, ".env"), envConfig);
+  writeFile(path.join(projectPath, ".env.example"), envConfig);
+
+  const envViteConfig = `
+/// <reference types="vite/client" />
+  `;
+
+  writeFile(path.join(projectPath, "src", "vite-env.d.ts"), envViteConfig);
 }
 
 module.exports = configureAxios;

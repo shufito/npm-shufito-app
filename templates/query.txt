@@ -50,8 +50,8 @@ const login = async () => {
   const url = `/service.sbr?serviceName=MobileLoginSP.login&outputType=json`;
   const body = {
     requestBody: {
-      NOMUSU: { $: "" },
-      INTERNO: { $: "" },
+      NOMUSU: { $: import.meta.env.VITE_NOMUSU },
+      INTERNO: { $: import.meta.env.VITE_INTERNO },
       KEEPCONNECTED: { $: "N" },
     },
   };
@@ -393,6 +393,67 @@ const montarDadosEnvioNovo = (
   };
 };
 
+// Monta payload para múltiplos registros numa única chamada
+const montarDadosEnvioNovoLote = (
+  dadosLista: Dados[],
+  instancia: string,
+  chavesPrimarias?: ChavePrimaria | ChavePrimaria[]
+) => {
+  if (!Array.isArray(dadosLista) || dadosLista.length === 0) {
+    throw new Error("Lista de dados vazia.");
+  }
+
+  // Campos definidos pelo primeiro item, mantendo a ordem das chaves
+  const camposBase = Object.keys(dadosLista[0]).map((c) => c.toUpperCase());
+
+  const records = dadosLista.map((dados, idx) => {
+    const values: Record<string, string> = {};
+
+    // Preenche values pelo índice dos camposBase
+    camposBase.forEach((campoUpper, i) => {
+      const campoOriginal = Object.keys(dados).find(
+        (k) => k.toUpperCase() === campoUpper
+      );
+      const valor = campoOriginal ? dados[campoOriginal] : undefined;
+      if (valor !== null && valor !== undefined) {
+        values[i.toString()] =
+          valor instanceof Date ? format(valor, "dd/MM/yyyy") : String(valor);
+      }
+    });
+
+    // pk comum para todos ou específico por índice
+    let pk: ChavePrimaria | undefined;
+    if (Array.isArray(chavesPrimarias)) {
+      pk = chavesPrimarias[idx];
+    } else {
+      pk = chavesPrimarias;
+    }
+
+    const record: any = { values };
+    if (pk) {
+      record.pk = Object.keys(pk).reduce(
+        (acc, chave) => {
+          acc[chave.toUpperCase()] = String(pk![chave]);
+          return acc;
+        },
+        {} as Record<string, string>
+      );
+    }
+
+    return record;
+  });
+
+  return {
+    serviceName: "DatasetSP.save",
+    requestBody: {
+      entityName: instancia,
+      fields: camposBase,
+      records,
+    },
+  };
+};
+
+
 const salvarRegistroNovo = async (
   dados: Dados,
   instancia: string,
@@ -421,6 +482,38 @@ const salvarRegistroNovo = async (
   }
 };
 
+// Salva múltiplos registros em uma única chamada
+const salvarRegistrosNovos = async (
+  dadosLista: Dados[],
+  instancia: string,
+  chavesPrimarias?: ChavePrimaria | ChavePrimaria[]
+) => {
+  const url = "/service.sbr?serviceName=DatasetSP.save&outputType=json";
+  const dadosEnvio = montarDadosEnvioNovoLote(
+    dadosLista,
+    instancia,
+    chavesPrimarias
+  );
+
+  try {
+    if (window.location.origin.includes("localhost")) {
+      console.log("Rodando no localhost, iniciando login...");
+      await login();
+    }
+
+    const response = await postRequest(url, dadosEnvio);
+
+    if (window.location.origin.includes("localhost")) {
+      console.log("Executando logout...");
+      await logout();
+    }
+
+    return response;
+  } catch (error: unknown) {
+    throw new Error(`${(error as Error).message}`);
+  }
+};
+
 const formatarResposta = (response: any, campos: string[]) => {
   if (
     !response?.responseBody?.result ||
@@ -429,21 +522,41 @@ const formatarResposta = (response: any, campos: string[]) => {
     throw new Error("Resposta inválida.");
   }
 
-  const resultado = response.responseBody.result[0]; // Pegamos o primeiro item da lista "result"
-  if (!resultado || resultado.length !== campos.length) {
-    throw new Error("Formato inesperado de resposta.");
+  // Se houver mais de um resultado, retorna lista de objetos
+  if (response.responseBody.result.length > 1) {
+    return response.responseBody.result.map((resultado: any[]) => {
+      if (!resultado || resultado.length < 1) return {};
+      return campos.reduce(
+        (acc, campo, index) => {
+          acc[campo] = resultado[index];
+          return acc;
+        },
+        {} as Record<string, any>
+      );
+    });
   }
 
-  // Criamos um objeto com os campos esperados mapeados para os valores retornados
-  const respostaFormatada = campos.reduce(
+  const resultado = response.responseBody.result[0];
+  if (!resultado || resultado.length !== campos.length) {
+    // Para compatibilidade, não força igualdade estrita quando serviço retorna menos colunas
+    // Apenas mapeia até o mínimo comum
+    const limite = Math.min(campos.length, resultado?.length || 0);
+    return campos.slice(0, limite).reduce(
+      (acc, campo, index) => {
+        acc[campo] = resultado[index];
+        return acc;
+      },
+      {} as Record<string, any>
+    );
+  }
+
+  return campos.reduce(
     (acc, campo, index) => {
       acc[campo] = resultado[index];
       return acc;
     },
     {} as Record<string, any>
   );
-
-  return respostaFormatada;
 };
 
 export const salvarNovo = async (
@@ -451,7 +564,18 @@ export const salvarNovo = async (
   instancia: string,
   chavesPrimarias?: ChavePrimaria | ChavePrimaria[]
 ) => {
-  const campos = Object.keys(dados).map((campo) => campo.toUpperCase());
+  const campos = Array.isArray(dados)
+    ? Object.keys(dados[0] || {}).map((c) => c.toUpperCase())
+    : Object.keys(dados).map((c) => c.toUpperCase());
+
+  if (Array.isArray(dados)) {
+    const response = await salvarRegistrosNovos(
+      dados,
+      instancia,
+      chavesPrimarias
+    );
+    return formatarResposta(response, campos);
+  }
 
   if (Array.isArray(chavesPrimarias) && chavesPrimarias.length) {
     const resultados = await Promise.all(
@@ -466,15 +590,38 @@ export const salvarNovo = async (
   return formatarResposta(response, campos);
 };
 
-export const uploadFile = async (file: File, sessionKey: string) => {
+export const sanitizeFileName = (fileName: string) => {
+  return fileName
+    .normalize("NFD") // Remove acentos
+    .replace(/[\u0300-\u036f]/g, "") // Remove marcas diacríticas (acentos)
+    .replace(/[^a-zA-Z0-9._-]/g, "_") // Substitui caracteres especiais por "_"
+    .replace(/\s+/g, "_") // Substitui espaços por "_"
+    .toLowerCase(); // Converte para minúsculas
+};
+
+export const generateUUID = () => {
+  return (
+    Date.now().toString(36) +
+    Math.random().toString(36).substring(2, 15) +
+    Math.random().toString(36).substring(2, 15)
+  );
+};
+
+export const uploadFile = async (file?: File): Promise<string | null> => {
+  if (!file || !(file instanceof File)) {
+    console.error("Arquivo inválido.");
+    return null;
+  }
+
+  const sanitizedFileName = encodeURIComponent(
+    `${sanitizeFileName(file.name)}_${generateUUID()}`
+  );
   const formData = new FormData();
-  formData.append("arquivo", file); // Adiciona o arquivo ao FormData
+  formData.append("arquivo", file);
 
   try {
-    const response = await axiosInstance.post(
-      `/sessionUpload.mge?sessionkey=${encodeURIComponent(
-        sessionKey
-      )}&fitem=S&salvar=S&useCache=N`,
+    await axiosInstance.post(
+      `/sessionUpload.mge?sessionkey=${sanitizedFileName}&fitem=S&salvar=S&useCache=N`,
       formData,
       {
         headers: {
@@ -483,8 +630,142 @@ export const uploadFile = async (file: File, sessionKey: string) => {
       }
     );
 
-    console.log("Upload concluído:", response.data);
+    return sanitizedFileName;
   } catch (error) {
     console.error("Erro no upload:", error);
+    return null;
+  }
+};
+
+export function getDownloadUrl(file: any) {
+  const fullPath = `${file.path}/${file.internalName}`;
+  const encoded = btoa(fullPath); // Base64 encode
+  return `${window.location.origin}/download.mge?fileName=${encoded}&fileNameIsEncoded=S`;
+}
+
+// Helper: converte chaves do objeto PK para UPPERCASE e valores para string
+const normalizarPk = (pk: ChavePrimaria): Record<string, string> => {
+  return Object.keys(pk).reduce(
+    (acc, chave) => {
+      acc[chave.toUpperCase()] = String(pk[chave]);
+      return acc;
+    },
+    {} as Record<string, string>
+  );
+};
+
+// Remove um ou mais registros via DatasetSP.removeRecord
+export const removeRegistros = async (
+  instancia: string,
+  chavesPrimarias: ChavePrimaria | ChavePrimaria[]
+) => {
+  const url = "/service.sbr?serviceName=DatasetSP.removeRecord&outputType=json";
+
+  const pks = Array.isArray(chavesPrimarias)
+    ? chavesPrimarias.map((pk) => normalizarPk(pk))
+    : [normalizarPk(chavesPrimarias)];
+
+  const body = {
+    serviceName: "DatasetSP.removeRecord",
+    requestBody: {
+      entityName: instancia,
+      pks,
+    },
+  };
+
+  try {
+    if (window.location.origin.includes("localhost")) {
+      await login();
+    }
+
+    const response = await postRequest(url, body);
+
+    if (window.location.origin.includes("localhost")) {
+      await logout();
+    }
+
+    return response;
+  } catch (error: unknown) {
+    throw new Error(`${(error as Error).message}`);
+  }
+};
+
+type CepResponse = {
+  responseBody?: {
+    ceps?: {
+      enderecos?: EnderecoResponse | EnderecoResponse[];
+    };
+  };
+};
+
+type Endereco = {
+  cep: string;
+  codBairro: string;
+  codCid: string;
+  codEnd: string;
+  codUf: string;
+  descBairro: string;
+  descCid: string;
+  descEnd: string;
+  descUf: string;
+};
+
+type EnderecoResponse = Endereco & {
+  codReg: string;
+  descReg: string;
+};
+
+export const consultaCep = async (
+  Cep: string
+): Promise<EnderecoResponse | undefined> => {
+  const url =
+    "/service.sbr?serviceName=PesquisaCepSP.obterDadosDoCep&outputType=json";
+  const body = {
+    serviceName: "DbExplorerSP.executeQuery",
+    requestBody: { cep: { $: Cep } },
+  };
+
+  const isLocal = window.location.origin.includes("localhost");
+
+  try {
+    if (isLocal) {
+      console.log("Rodando no localhost, iniciando login...");
+      await login();
+    }
+
+    const response = await postRequest<CepResponse>(url, body);
+
+    let endereco = response.responseBody?.ceps?.enderecos;
+
+    if (!endereco) {
+      console.warn("Nenhum endereço encontrado para o CEP:", Cep);
+      return;
+    }
+
+    // normaliza se for array
+    if (Array.isArray(endereco)) {
+      endereco = endereco[0];
+    }
+
+    // busca CODREG
+    const resultaCodReg = await fetchQuery(
+      `SELECT TOP 1 CID.CODREG,NOMEREG FROM TSICID CID 
+LEFT JOIN TSIREG REG ON REG.CODREG = CID.CODREG 
+WHERE CID.CODCID =  ${endereco.codCid}`
+    );
+
+    return {
+      ...endereco,
+      codReg: resultaCodReg?.[0]?.CODREG?.toString() ?? "0",
+      descReg: resultaCodReg?.[0]?.NOMEREG?.trim() ?? "",
+    };
+  } catch (err) {
+    console.error("Erro ao consultar CEP:", err);
+    return;
+  } finally {
+    if (isLocal) {
+      console.log("Executando logout...");
+      await logout();
+    }
   }
 };
