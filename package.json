@@ -1,6 +1,6 @@
 {
   "name": "create-shufito-app",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "CLI para criar projetos com Vite, Tailwind e ShadCN",
   "main": "index.js",
   "bin": {
@@ -11,7 +11,7 @@
     "index.js","setup","templates","utils","prompts"
   ],
   "scripts": {
-    "build": "echo 'build step (opcional)'"
+    "build": "node index.js ."
   },
   "keywords": [
     "vite",

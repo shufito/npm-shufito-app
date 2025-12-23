@@ -21,13 +21,12 @@ function configureAxios(projectPath, isDashSankhya) {
 
   const viteConfig = `
 import { defineConfig } from 'vite'
-import tailwindcss from "@tailwindcss/vite"
 import path from "path"
 import react from '@vitejs/plugin-react-swc'
 import { convertToSankhyaBI } from "@insulino/vite-plugin-2sankhyabi"
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), { ...convertToSankhyaBI(), apply: "build" }],
+  plugins: [react(), { ...convertToSankhyaBI(), apply: "build" }],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -47,8 +46,8 @@ export default defineConfig({
   writeFile(path.join(projectPath, "vite.config.ts"), viteConfig);
 
   const envConfig = `
-VITE_USERLOGIN = ""
-VITE_PASSWORD = ""
+VITE_NOMUSU = ""
+VITE_INTERNO = ""
   `;
   writeFile(path.join(projectPath, ".env"), envConfig);
   writeFile(path.join(projectPath, ".env.example"), envConfig);

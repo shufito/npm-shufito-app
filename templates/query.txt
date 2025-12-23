@@ -769,3 +769,44 @@ WHERE CID.CODCID =  ${endereco.codCid}`
     }
   }
 };
+
+export function getUrl(
+  resourceID: string,
+  chavesPrimarias?: any,
+  originOverride?: string
+) {
+  // Determina origin com fallback (útil para testes/SSR)
+  const origin =
+    originOverride || (typeof window !== "undefined" && window.location?.origin) || "";
+
+  const basePath = "/mge/system.jsp#app/";
+
+  // btoa falha com caracteres unicode; usa método seguro para base64
+  const toBase64 = (str: string) => {
+    if (typeof btoa === "function") {
+      return btoa(unescape(encodeURIComponent(str)));
+    }
+    // Node.js fallback (quando Buffer estiver disponível)
+    if (typeof Buffer !== "undefined") {
+      return Buffer.from(str, "utf-8").toString("base64");
+    }
+    // último recurso: retorna string não codificada
+    return str;
+  };
+
+  const resEncoded = toBase64(resourceID);
+  let url = origin ? `${origin}${basePath}${resEncoded}` : `${basePath}${resEncoded}`;
+
+  if (chavesPrimarias) {
+    const body: Record<string, string | number> = {};
+
+    Object.keys(chavesPrimarias).forEach(function (chave) {
+      const val = chavesPrimarias[chave];
+      body[chave] = typeof val === "number" || !isNaN(val) ? Number(val) : String(val);
+    });
+
+    url = `${url}/${toBase64(JSON.stringify(body))}`;
+  }
+
+  return url;
+}

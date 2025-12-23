@@ -7,12 +7,11 @@ function configureShadcn() {
   fs.writeFileSync(
     "vite.config.ts",
     `import { defineConfig } from 'vite'
-import tailwindcss from "@tailwindcss/vite"
 import path from "path"
 import react from '@vitejs/plugin-react-swc'
 
 export default defineConfig({
-  plugins: [react(), tailwindcss()],
+  plugins: [react()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
